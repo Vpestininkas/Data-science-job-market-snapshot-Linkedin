@@ -50,17 +50,7 @@ def cities(x):
         city='Error'
     else:
         city=city[0]
-    country=GeoText(x).countries
-    if len(country)==0:
-        if 'Czechia' in x:
-            country='Czechia'
-        else:
-            country='Error'
-    elif len(set(country))>1:
-        country='Error'
-    else:
-        country=country[0]
-    return city, country
+    return city
 
 def scientist(x):
     if 'scientist' in x.lower():
@@ -262,7 +252,7 @@ for ind_country,country in tqdm(enumerate(countries)):
         #3.4.4) Adding things to final frame
         jobs=pd.concat([jobs,pd.DataFrame(index=range(len(current_batch)),columns=jobs.columns)],axis=0,ignore_index=True)
         jobs.loc[len(jobs)-len(current_batch):,'link']=current_batch.values
-        jobs.loc[len(jobs)-len(current_batch):,'country_search']=country
+        jobs.loc[len(jobs)-len(current_batch):,'country']=country
         jobs.loc[len(jobs)-len(current_batch):,'page']=page        
 
 #4) Gathering data from the gathered links. Loop start
@@ -270,16 +260,27 @@ jobs= jobs[jobs['link'].notna()]
 jobs=jobs.drop_duplicates()
 
 for ind,link in tqdm(zip(jobs.index,jobs['link']),total=len(jobs)):
+    #4.1) While loop with try to deal with all unaccounted errors
     main_while_flag=True
     while main_while_flag:
         try:
             driver.get(link)
+
+            #4.1.1) Waiting for button to appear as a measure of loaded page, then checking whether job post is dead
             loop_flag=True
             skip=False
             while loop_flag:
                 try:
                     WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.CLASS_NAME, 'jobs-description__footer-button')))
                     loop_flag=False
+                    try:
+                        if 'No longer accepting applications'==driver.find_element(By.CLASS_NAME,'artdeco-inline-feedback__message').text:
+                            loop_flag=False
+                            skip=True
+                            jobs.loc[ind,'dead']=True 
+                            continue
+                    except:
+                        None
                 except:
                     try:
                         if 'No longer accepting applications'==driver.find_element(By.CLASS_NAME,'artdeco-inline-feedback__message').text:
@@ -291,8 +292,10 @@ for ind,link in tqdm(zip(jobs.index,jobs['link']),total=len(jobs)):
                         None
                     driver.get(link)
             if skip:
+                main_while_flag=False
                 continue
-            
+
+            #4.1.2) Getting table of various info (location, company, reposted or not and applicant amount. While loop in case of slow loading. meta count in case of overly consistent unkown type of error
             info=driver.find_element(By.CLASS_NAME,"job-details-jobs-unified-top-card__primary-description-container").text.split('·')
             count=0
             meta_count=0
@@ -312,7 +315,8 @@ for ind,link in tqdm(zip(jobs.index,jobs['link']),total=len(jobs)):
                     count=0
                     if meta_count==4:
                         flag=False
-        
+
+            #4.1.3) Getting job title, while loop in case of error. While stop in case of persistent error. This part of website is less prone to weird errors unlike the info part above hence page is reseted for this only once
             count=0
             flag=True
             while_stop=False
@@ -322,25 +326,19 @@ for ind,link in tqdm(zip(jobs.index,jobs['link']),total=len(jobs)):
                 text=driver.find_element(By.CLASS_NAME,'t-24').text
                 count=count+1
                 if count==40:
-                    if i==len(info_blocks):
-                        i=i-1
-                    else:
-                        i=i+1
-                    info_blocks[i].click()
-                    time.sleep(1)
+                    driver.get(link)
                     count=0
                     if while_stop:
                         flag=False
                     while_stop=True
-                    
+
+            #4.1.4) putting in the gathered data
             jobs.loc[ind,'title']=text
             jobs.loc[ind,'scientist']=scientist(text)
-            
-        
-                    
             jobs.loc[ind,'company']=info[0]
             jobs.loc[ind,'raw_location']=info[1]
-            jobs.loc[ind,'city'],jobs.loc[ind,'country']=cities(info[1])
+            jobs.loc[ind,'city']=cities(info[1])
+            
             if isinstance(jobs.loc[ind,'post time'], float):
                 jobs.loc[ind,'post time']=time_adjust(info[2])
             if 'Reposted' in info[2]:
@@ -352,7 +350,8 @@ for ind,link in tqdm(zip(jobs.index,jobs['link']),total=len(jobs)):
                 jobs.loc[ind,'applicants']=re.findall(r'\d+', str(info[3]))[0]
             except:
                 jobs.loc[ind,'applicants']=np.nan
-                
+
+            #4.1.5) Pressing the button for description to open up if needed
             button=driver.find_element(By.CLASS_NAME, 'jobs-description__footer-button')
             more_flag=True
             while more_flag:
@@ -360,18 +359,37 @@ for ind,link in tqdm(zip(jobs.index,jobs['link']),total=len(jobs)):
                     button.click()
                     if 'more' not in button.find_element(By.CLASS_NAME, 'artdeco-button__text').text:
                         more_flag=False
-                
+            
             jobs.loc[ind,'description']=driver.find_element(By.CLASS_NAME,"jobs-box__html-content").text
             jobs.loc[ind,'lang']=detect_langs(jobs.loc[ind,'description'])[0]
-        
+
+            #4.1.6) Getting info on whether a job is on site. While loop in case of errors
+            count=0
+            flag=True
+            while_stop=False
             text=driver.find_element(By.CLASS_NAME,'job-details-jobs-unified-top-card__job-insight').text
+            text=is_on_site(text)
+            while text==-2 and flag:
+                time.sleep(0.5)
+                text=driver.find_element(By.CLASS_NAME,'t-24').text
+                count=count+1
+                if count==20:
+                    driver.get(link)
+                    count=0
+                    if while_stop:
+                        flag=False
+                    while_stop=True
+            
             jobs.loc[ind,'on_site']=is_on_site(text)
             main_while_flag=False
+
+        #4.1.7) End of the very first "try"  
         except KeyboardInterrupt:
             main_while_flag=False
         except:
             None
-        
+
+#4.2) Pickling data 
 main_dataframes={}
 main_dataframes['jobs']=jobs.copy()
 file_path='C:/Users/user/Desktop/projects/main_dataframes.pickle'
