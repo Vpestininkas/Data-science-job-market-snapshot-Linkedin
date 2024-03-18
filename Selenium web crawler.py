@@ -155,7 +155,29 @@ def info_blocks_error_check():
             else:
                 flag=False
         except:
-            
+            except_flag=True
+            while except_flag:
+                if len(info_blocks)<25:
+                    driver.get(current_link+str(page*25))
+                    try:
+                        info_blocks=WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.CLASS_NAME, "scaffold-layout__list-container")))
+                        info_blocks= info_blocks.find_elements(By.CLASS_NAME,"jobs-search-results__list-item")
+                        try:
+                            info_blocks[0].click()
+                        except:
+                            info_blocks=driver.find_element(By.CLASS_NAME, "scaffold-layout__list-container")
+                            info_blocks= info_blocks.find_elements(By.CLASS_NAME,"jobs-search-results__list-item")
+                    except:
+                        for i in range(0,10):
+                            time.sleep(1)
+                    
+                    count=count+1
+                    if count==3:
+                        final_page=True
+                        except_flag=False
+                else:
+                    except_flag=False
+                    
                 
         if restart:
             refresh_count=0
