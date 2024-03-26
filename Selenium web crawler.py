@@ -281,7 +281,10 @@ for ind_country,country in tqdm(enumerate(countries)):
 jobs= jobs[jobs['link'].notna()]
 jobs=jobs.drop_duplicates()
 
+break_flag=False
 for ind,link in tqdm(zip(jobs.index,jobs['link']),total=len(jobs)):
+    if break_flag:
+        break
     #4.1) While loop with try to deal with all unaccounted errors
     main_while_flag=True
     while main_while_flag:
@@ -330,6 +333,11 @@ for ind,link in tqdm(zip(jobs.index,jobs['link']),total=len(jobs)):
                     None
                 time.sleep(0.5)
                 info=driver.find_element(By.CLASS_NAME,"job-details-jobs-unified-top-card__primary-description-container").text.split('·')
+                if len(info)==3:
+                    page_text=driver.page_source
+                    page_text= page_text[page_text.find('See how you compare to ')+len('See how you compare to'):]
+                    info.append(re.findall(r'\d+', page_text[:page_text.find(' applicant')])[0])
+                    flag=False
                 count=count+1
                 if count==40:
                     meta_count=meta_count+1
@@ -390,11 +398,22 @@ for ind,link in tqdm(zip(jobs.index,jobs['link']),total=len(jobs)):
             flag=True
             while_stop=False
             text=driver.find_element(By.CLASS_NAME,'job-details-jobs-unified-top-card__job-insight').text
+            try:
+                level=text.split(' ')[2]
+            except:
+                level=np.nan
             text=is_on_site(text)
             while text==-2 and flag:
+
                 time.sleep(0.5)
-                text=driver.find_element(By.CLASS_NAME,'t-24').text
+                text=driver.find_element(By.CLASS_NAME,'job-details-jobs-unified-top-card__job-insight').text
+                text=is_on_site(text)
+                try:
+                    level=text.split(' ')[2]
+                except:
+                    level=np.nan
                 count=count+1
+
                 if count==20:
                     driver.get(link)
                     count=0
@@ -402,14 +421,17 @@ for ind,link in tqdm(zip(jobs.index,jobs['link']),total=len(jobs)):
                         flag=False
                     while_stop=True
             
-            jobs.loc[ind,'on_site']=is_on_site(text)
+            jobs.loc[ind,'on_site']=text
+            jobs.loc[ind,'level']=level
             main_while_flag=False
 
         #4.1.7) End of the very first "try"  
         except KeyboardInterrupt:
             main_while_flag=False
+            break_flag=True
         except:
             None
+            
 
 #4.2) Pickling data 
 main_dataframes={}
